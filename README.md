@@ -1,429 +1,91 @@
-# Yggdrasil-ng
+# yggnode
 
-A Rust rewrite of the [Yggdrasil Network](https://yggdrasil-network.github.io/) — an early-stage implementation of a fully end-to-end encrypted IPv6 networking protocol.
-This project aims to provide a lightweight, self-arranging, and secure mesh network alternative to the original Go implementation.
-
-## Features
-
-- **End-to-end encryption** for all network traffic using XSalsa20-Poly1305 (RustCrypto implementation)
-- **Self-arranging mesh topology** — nodes automatically discover optimal paths via spanning tree routing
-- **IPv6 native** — provides every node with a unique, cryptographically bound IPv6 address derived from Ed25519 public key
-- **Cross-platform** support (Linux, macOS, Windows)
-- **Lightweight** — minimal resource footprint, suitable for embedded devices and routers
-- **Rust implementation** — memory safety, performance, zero-cost abstractions, and modern tooling
-
-### Implementation Status
-
-**✅ Fully Implemented:**
-- Core routing protocol (spanning tree, path discovery, bloom filters)
-- End-to-end encryption with forward secrecy (session key ratcheting)
-- TCP and TLS transports with automatic reconnection and exponential backoff
-- TUN/TAP interface for IPv6 traffic
-- Admin socket API (getSelf, getPeers, getTree, getPaths, getSessions, addPeer, removePeer, etc.)
-- Session cleanup and timeout handling
-- Optimized Ed25519→Curve25519 key conversion
-- Single binary for daemon and control commands (no separate `yggdrasilctl`)
-- Windows service support (runs as `yggdrasil-ng` service via SCM)
-- UniFFI bindings for Android
-- Crypto-Key Routing (CKR) — tunnel arbitrary IPv4/IPv6 subnets through the mesh (enabled by default via the `ckr` feature)
-
-**⏳ Planned Features:**
-- Multicast peer discovery on local networks
-- Performance optimizations and protocol improvements
-
-## Building from Source
-
-### Prerequisites
-
-- [Rust](https://rustup.rs/) (latest stable version recommended)
-- Cargo (included with Rust)
-
-### Clone the Repository
-
-```bash
-git clone https://github.com/Revertron/Yggdrasil-ng.git
-cd Yggdrasil-ng
-```
-
-### Building the Binaries
-
-#### Build Both Binaries (Release Mode)
-
-```bash
-cargo build --release
-```
-
-This will produce a single binary in `./target/release/`:
-- `yggdrasil` — The network daemon and control tool (combined)
-
-#### Development/Debug Builds
-
-For development purposes with faster compile times (but slower runtime performance):
-
-```bash
-cargo build
-```
-
-Binaries will be located in `./target/debug/`.
-
-### Cross-Compilation
-
-To build for a different target, use the `--target` flag. For example, for Linux ARM64:
-
-```bash
-cargo build --release --target aarch64-unknown-linux-gnu
-```
-
-## Installation
-
-After building, you can install the binary system-wide:
-
-```bash
-# Copy binary to system PATH
-sudo cp target/release/yggdrasil /usr/local/bin/
-
-# Or use cargo install for local user installation
-cargo install --path crates/yggdrasil
-```
-
-## Container Image
-
-Release container images are available from GitHub Container Registry.
-See [docs/CONTAINER.md](docs/CONTAINER.md) for tags, supported platforms, and Docker/Podman usage.
-
-## Usage
-
-### Command Line Options
-
-```bash
-yggdrasil [options]
-```
-
-**Available options:**
-
-| Option | Description |
-|--------|-------------|
-| `-g, --genconf [FILE]` | Generate a new configuration (save to FILE or print to stdout) |
-| `-c, --config FILE` | Config file path (default: `yggdrasil.toml`) |
-| `--autoconf` | Run without a configuration file (use ephemeral keys) |
-| `-a, --address` | Print the IPv6 address for the given config and exit |
-| `-s, --subnet` | Print the IPv6 subnet for the given config and exit |
-| `-l, --loglevel LEVEL` | Log level: error, warn, info, debug, trace (default: info) |
-| `-n, --no-replace` | With `--genconf FILE`, skip if the file already exists |
-| `--logto FILE` | Log to a file instead of stderr (appends) |
-| `--service` | Run as a Windows service (Windows only) |
-| `-h, --help` | Print help message |
-| `-v, --version` | Print version |
-
-**Environment variables:**
-
-- `YGGDRASIL_PRIVATE_KEY`: Hex-encoded Ed25519 private key (128 hex chars). Overrides config file if set.
-
-### Starting Yggdrasil
-
-Generate a default configuration file:
-
-```bash
-yggdrasil --genconf > yggdrasil.toml
-# Or save directly to a file:
-yggdrasil --genconf=yggdrasil.toml
-```
-
-Edit the configuration to add peers, then start the daemon:
-
-```bash
-sudo yggdrasil -c yggdrasil.toml
-```
-
-Or run with auto-configuration (ephemeral key):
-
-```bash
-sudo yggdrasil --autoconf
-```
-
-Print your address without starting the daemon:
-
-```bash
-yggdrasil --config yggdrasil.toml --address
-```
-
-### Control Commands
-
-The `yggdrasil` binary doubles as a control tool. Pass commands as positional arguments to query or manage a running daemon:
-
-```bash
-# Get your node's info
-yggdrasil getSelf
-
-# List connected peers
-yggdrasil getPeers
-
-# View routing table (spanning tree)
-yggdrasil getTree
-```
-
-**Supported commands:**
-
-*Local queries:*
-- `getSelf` - Show node info (address, subnet, public key, coordinates)
-- `getPeers` - List active peer connections with statistics
-- `getTree` - Show routing table entries (spanning tree)
-- `getPaths` - Show cached paths to remote destinations
-- `getSessions` - Show active encrypted sessions
-- `getTUN` - Show TUN adapter status
-- `addPeer uri=<URI>` / `removePeer uri=<URI>` - Manage peer connections
-
-*Remote queries:*
-- `getNodeInfo key=<hex>` - Query node metadata from remote node
-- `debug_remoteGetSelf key=<hex>` - Query self info from remote node
-- `debug_remoteGetPeers key=<hex>` - Query peer list from remote node
-- `debug_remoteGetTree key=<hex>` - Query tree entries from remote node
-
-*Path diagnostics:*
-- `getLookup key=<hex>` - Show cached lookup for a key
-- `forceLookup key=<hex>` - Force a new path lookup
-
-By default, control commands connect to `tcp://localhost:9001`. You can specify a different address:
-
-```bash
-yggdrasil -e tcp://127.0.0.1:9001 getPeers
-```
-
-Use `-j` / `--json` to get raw JSON output instead of formatted tables.
-
-## Configuration
-
-### Config File Format: TOML
-
-Yggdrasil-ng uses **TOML** format for configuration (unlike the Go version which uses HJSON/JSON).
-
-**Key configuration options:**
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `private_key` | string | Hex-encoded Ed25519 private key (128 hex chars, 64 bytes) |
-| `peers` | array | Peer URIs to connect to, e.g. `["tcp://host:port"]` |
-| `listen` | array | Listen addresses, e.g. `["tcp://[::]:1234"]` |
-| `admin_listen` | string | Admin socket address, e.g. `"tcp://localhost:9001"` |
-| `if_name` | string | TUN interface name: "auto" (default) or "none" to disable |
-| `if_mtu` | integer | TUN MTU (default: 65535) |
-| `node_info` | table | Custom node metadata (TOML table) |
-| `node_info_privacy` | bool | Hide node info from other nodes (default: false) |
-| `allowed_public_keys` | array | Whitelist of allowed peer keys (empty = allow all) |
-| `[tunnel_routing]` | table | CKR tunnel routing config (`ckr` feature, enabled by default) — see [docs/CKR.md](docs/CKR.md) |
-
-**Example minimal configuration:**
-
-```toml
-# Your private Ed25519 key (DO NOT share!)
-private_key = "0123456789abcdef..."
-
-# Peers to connect to
-peers = [
-    "tcp://192.0.2.1:443",
-    "tcp://[2001:db8::1]:12345"
-]
-
-# Listen for incoming connections
-listen = ["tcp://[::]:1234"]
-
-# Admin socket for yggdrasilctl
-admin_listen = "tcp://localhost:9001"
-
-# TUN interface settings
-if_name = "auto"
-if_mtu = 65535
-
-# Custom node metadata (optional)
-[node_info]
-name = "my-node"
-location = "datacenter-1"
-```
-
-### Transports
-
-Both `peers` and `listen` accept the following URI schemes:
-
-| Scheme | Description | Cargo feature |
-|--------|-------------|---------------|
-| `tcp://` | Plain TCP | always available |
-| `tls://` | TLS over TCP (self-signed certs, authenticated by the Yggdrasil handshake) | always available |
-| `ws://` | WebSocket — useful behind HTTP reverse proxies | `ws` (default) |
-| `wss://` | WebSocket over TLS — e.g. behind nginx with a real certificate | `ws` (default) |
-| `quic://` | QUIC over UDP | `quic` (default) |
-
-`ws://host` and `wss://host` default to ports 80/443; a path (e.g. `wss://host/yggdrasil`) is honored when dialing, which allows reverse proxies to route by path. For slim builds (e.g. OpenWrt), `ws` (~300 KiB) and `quic` (~1.2 MiB) can be excluded via `--no-default-features` with a hand-picked feature list, e.g. `--no-default-features --features ctl,tun,systemd` for the smallest useful daemon.
-
-### Peer URI Query Parameters
-
-Both `peers` entries and `listen` addresses support optional query-string parameters:
-
-**Outbound peers** (`peers`):
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `password=PASSWORD` | Shared secret required to connect (max 64 chars, must match remote side) | `?password=secret` |
-| `key=PUBLICKEY` | Pin the expected public key (hex); connection fails if remote key differs | `?key=aabbcc...` |
-| `priority=N` | Connection priority (0-255, lower = higher priority) when multiple connections exist to the same peer | `?priority=10` |
-| `maxbackoff=DURATION` | Maximum reconnect backoff interval if the peer goes down (min 5s, default 68m) | `?maxbackoff=30s` |
-| `sni=HOSTNAME` | Override TLS SNI hostname (TLS only; ignored for plain TCP) | `?sni=example.com` |
-
-**Inbound listeners** (`listen`):
-
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `password=PASSWORD` | Require this password from connecting peers (max 64 chars) | `?password=secret` |
-
-Duration values for `maxbackoff` accept plain seconds (`30`) or human-readable format (`30s`, `5m`, `1h`, `1h30m`).
-
-**Example with multiple parameters:**
-
-```toml
-peers = [
-    # VPS relay: faster reconnect, pinned key, TLS with custom SNI
-    "tls://relay.example.com:2096?maxbackoff=30s&key=aabbccdd...&sni=example.net",
-
-    # LAN node: higher priority than WAN peers
-    "tcp://192.168.1.10:12345?priority=10",
-
-    # Password-protected peer
-    "tcp://peer.example.com:12345?password=mysecret",
-]
-```
-
-### Differences from Go Version
-
-**Command line:**
-- `-c/--config` instead of `-useconffile`
-- `--genconf [FILE]` instead of `-genconf` (can save directly to file)
-- Config file defaults to `yggdrasil.toml` (not required to specify)
-- New `YGGDRASIL_PRIVATE_KEY` environment variable support
-
-**Config file:**
-- **Format**: TOML instead of HJSON/JSON
-- **Field names**: `snake_case` instead of `PascalCase`
-  - `private_key` instead of `PrivateKey`
-  - `admin_listen` instead of `AdminListen`
-  - `if_name` instead of `IfName`
-  - `if_mtu` instead of `IfMTU`
-  - `node_info` instead of `NodeInfo`
-  - `node_info_privacy` instead of `NodeInfoPrivacy`
-  - `allowed_public_keys` instead of `AllowedPublicKeys`
-- **Single binary**: Daemon and control tool are combined (no separate `yggdrasilctl`)
-- **Transport support**: TCP, TLS, WebSocket (ws/wss) and QUIC — same schemes as Go
-- **Admin socket**: Defaults to TCP `localhost:9001` instead of Unix socket
-
-**Migration from Go config:**
-1. Convert HJSON/JSON to TOML format
-2. Rename all fields from PascalCase to snake_case
-3. Transport URIs (`tcp://`, `tls://`, `ws://`, `wss://`, `quic://`) work unchanged
-4. Update admin socket to TCP format if using Unix socket
-
-## Crypto-Key Routing (CKR)
-
-CKR enables tunneling arbitrary IPv4/IPv6 traffic through the Yggdrasil mesh by mapping IP subnets to node public keys.
-This turns Yggdrasil into a point-to-point VPN — useful for exit-node setups, site-to-site tunnels, multi-node private VPNs,
-or handing out routable public IPv6 to home devices.
-
-CKR is part of the default feature set, so a standard build already includes it:
-
-```bash
-cargo build --release
-```
-
-To build without CKR, disable default features and re-enable the others:
-
-```bash
-cargo build --release --no-default-features --features ctl,tun,systemd
-```
-
-See the **[full CKR guide](docs/CKR.md)** for the `[tunnel_routing]` configuration reference and worked examples:
-
-- [Exit-node setup](docs/CKR.md#exit-node-setup) — route all of a client's internet traffic through a VPS
-- [Dual-stack site-to-site tunnel](docs/CKR.md#dual-stack-site-to-site-tunnel) — link two private networks
-- [Private IPv4 VPN (multi-node)](docs/CKR.md#private-ipv4-vpn-multi-node) — a shared private subnet across many nodes
-- [Routable IPv6 for home devices](docs/CKR.md#routable-ipv6-for-home-devices-hurricane-electric-alternative) — a self-hosted alternative to Hurricane Electric tunnel brokers
-
-## Running as a Windows Service
-
-On Windows, Yggdrasil-ng can run as a system service managed by the Service Control Manager (SCM).
-The service is registered under the name `yggdrasil-ng` (display name "Yggdrasil NG") to avoid conflicts with the Go version.
-
-### Register the service
-
-Open an elevated (Administrator) command prompt:
-
-```cmd
-sc create yggdrasil-ng binPath= "C:\path\to\yggdrasil.exe --service -c C:\path\to\yggdrasil.toml" start= auto DisplayName= "Yggdrasil NG"
-```
-
-> **Note:** The spaces after `binPath=`, `start=`, and `DisplayName=` are required by `sc`.
-
-### Start / Stop
-
-```cmd
-sc start yggdrasil-ng
-sc stop yggdrasil-ng
-```
-
-Or use the Services GUI (`services.msc`).
-
-### Remove the service
-
-```cmd
-sc delete yggdrasil-ng
-```
-
-### Running in console mode
-
-Without the `--service` flag, the binary runs as a normal console application and shuts down on Ctrl+C.
-This is the default and recommended mode for development and testing.
-
-## Development
-
-### Running Tests
-
-```bash
-cargo test
-```
-
-## Contributing
-
-Contributions are not very welcome! Please don't feel free to submit issues or pull requests.
-Ensure your code follows the project's own style guidelines and passes all tests.
-
-## License
-
-This project is licensed under the **Mozilla Public License 2.0 (MPL-2.0)** as the `ironwood`. See the [LICENSE](LICENSE) file for the full license text.
-
-## Links
-
-- [Yggdrasil Network Official Site](https://yggdrasil-network.github.io/)
-- [Original Yggdrasil (Go implementation)](https://github.com/yggdrasil-network/yggdrasil-go)
-- [Project Wiki](https://github.com/Revertron/Yggdrasil-ng/wiki)
-
-## Compatibility with Go Version
-
-Yggdrasil-ng is designed to be **wire-compatible** with the original Go implementation:
-
-- ✅ Can peer with Go nodes over TCP
-- ✅ Uses the same routing protocol and wire format
-- ✅ Compatible address derivation (Ed25519 → IPv6)
-- ✅ Compatible encryption (XSalsa20-Poly1305, session key ratcheting)
-- ⚠️  Config files are **not** directly compatible (different format and field names)
-
-**Interoperability tested with:**
-- Yggdrasil-go v0.5.x
-
-## Performance
-
-- Thorough tests are to be made, but some tests with iperf3 show significant improvements over the Go's version.
-- Also, the memory footprint is a lot smaller.
-- And binaries are smaller too :)
+**yggnode** is an ultra-lightweight, memory-optimized, fully static downstream distribution of [Yggdrasil-ng](https://github.com/Revertron/Yggdrasil-ng) engineered specifically for resource-constrained embedded Linux routers, IoT gateways, and low-power devices (MIPS, ARM, x86).
 
 ---
 
-**Note**: This is an experimental implementation under active development.
-While core functionality is stable and tested, some features are still being implemented.
-The network protocol is compatible with the Go version, but configuration format and CLI options differ.
-Suitable for testing and development; use in production at your own discretion.
+## 1. Primary Motivations & Objectives
+
+Most consumer routers and embedded edge devices operate with very limited memory pools (typically 32 MB to 64 MB of RAM and MIPS 24KEc/74Kc or Cortex-A7 processors). 
+
+- **The Problem with Standard Builds:** The reference Go implementation of Yggdrasil consumes between 18 MB and 40 MB RSS, frequently triggering Linux Out-Of-Memory (`oom-killer`) invocations on 64 MB routers sharing RAM with Wi-Fi drivers and firewall tables.
+- **The 32-bit Architecture Block:** Upstream Yggdrasil-ng introduced 64-bit atomics (`AtomicU64`) for MTU synchronization, causing immediate build and link failures on 32-bit MIPS architectures lacking native 64-bit atomic instructions.
+- **The Solution:** `yggnode` solves these problems by fixing 32-bit atomic operations, aggressively stripping unused transport layers, compiling statically against musl libc, and applying link-time optimizations. Under real network load, `yggnode` operates stably at ~2.5 MB RSS with a fully static binary footprint of ~3.4 MB.
+
+---
+
+## 2. Feature Profile: What is Excluded and Why
+
+The compilation uses `--no-default-features --features tun,ctl`. The following features are intentionally removed:
+
+| Excluded Feature | Rationale |
+|:---|:---|
+| <sub>**`quic`** (QUIC Transport)</sub> | <sub>**Memory & binary bloat.** QUIC requires substantial buffer allocations, timer queues, and complex state machines. For an edge router connecting to standard public peers, QUIC adds unnecessary overhead without performance gain.</sub> |
+| <sub>**`ws`** (WebSockets)</sub> | <sub>**Web layer redundancy.** WebSocket transport is aimed at browser environments and restrictive corporate firewalls. Router-to-router and router-to-peer links utilize direct TCP or TLS.</sub> |
+| <sub>**`ckr`** (Crypto Key Routing)</sub> | <sub>**RAM conservation.** Dynamic cryptographic key routing extensions add routing state tables that consume valuable memory on routers with <= 64 MB RAM. Standard Ironwood spanning tree routing is sufficient.</sub> |
+| <sub>**`systemd`** (systemd integration)</sub> | <sub>**Platform mismatch.** Embedded router operating systems (OpenWrt, Padavan, ASUSWRT, Keenetic, DD-WRT) utilize `procd`, `sysvinit`, `busybox init`, or `rc.unslung`, never systemd.</sub> |
+
+**Retained Core Features:**
+- <sub>**`tun`**: Direct interaction with the Linux kernel L3 TUN driver (`/dev/net/tun`), creating `ygg0` with full MTU configuration and kernel routing.</sub>
+- <sub>**`ctl`**: Local control socket protocol for diagnostics and status inspection via command-line utilities (`yggdrasil getPeers`, `yggdrasil getSelf`).</sub>
+
+---
+
+## 3. Patches & Architecture Modifications
+
+### 32-bit Atomic MTU Synchronization Fix
+- **File:** `crates/yggdrasil/src/ipv6rwc.rs`
+- **Issue:** Upstream committed MTU tracking using `AtomicU64`. On 32-bit MIPS architectures (`mipsel-unknown-linux-musl`, `mips-unknown-linux-musl`), 64-bit atomics are unavailable without software emulation libraries.
+- **Fix:** Switched `AtomicU64` to `AtomicU32`. Because IPv6 overlay MTU is mathematically bounded and clamped between 1280 and 65535 bytes, a 32-bit unsigned integer is completely sufficient, eliminating the need for missing 64-bit atomic instructions.
+
+---
+
+## 4. Hardware Architectures & Compilation Matrix
+
+All release binaries are compiled against static musl libc using GCC 16.x cross-toolchains with LTO (`opt-level = "z"`), `-Zbuild-std=std,panic_abort -Zbuild-std-features=optimize_for_size`, and section stripping (`sstrip`). Binaries have zero dynamic dependencies and execute identically on uClibc, musl, or glibc host firmwares.
+
+Each build passes a complete validation cycle: compilation under musl with LTO, extreme ELF section stripping via sstrip, binary execution verification in QEMU (`--version`), and packaging into distribution ZIP archives with md5 checksums.
+
+| Architecture | Target Triple | Target Hardware / Devices |
+|:---|:---|:---|
+| <sub>**mips-ath79-bigendian**</sub> | <sub>`mips-unknown-linux-musl`</sub> | <sub>Qualcomm Atheros AR9xxx / QCA95xx (OpenWrt `ath79`, soft-float)</sub> |
+| <sub>**mipsel-ramips-littleendian**</sub> | <sub>`mipsel-unknown-linux-musl`</sub> | <sub>MediaTek MT7620 / MT7621 / MT7628 (OpenWrt / Padavan / Keenetic `ramips`, soft-float)</sub> |
+| <sub>**armv7-cortexa7-hardfloat**</sub> | <sub>`armv7-unknown-linux-musleabihf`</sub> | <sub>Cortex-A7 / A9, Raspberry Pi 2 / Zero 2W, Orange Pi (hard-float)</sub> |
+| <sub>**arm64-aarch64**</sub> | <sub>`aarch64-unknown-linux-musl`</sub> | <sub>Cortex-A53 / A72, Raspberry Pi 3 / 4 / 5, modern ARM routers</sub> |
+| <sub>**x86_64-generic**</sub> | <sub>`x86_64-unknown-linux-musl`</sub> | <sub>64-bit Intel / AMD x86 servers, PC, VM, and VPS</sub> |
+| <sub>**i686-x86-32bit**</sub> | <sub>`i686-unknown-linux-musl`</sub> | <sub>32-bit x86 legacy hardware and thin clients</sub> |
+
+---
+
+## 5. Peer Selection & URI Scheme Compatibility
+
+To discover low-latency public peers, you can use the [peers_updater](https://github.com/ygguser/peers_updater) utility.
+
+However, when configuring peers on embedded routers, you must follow strict transport rules:
+
+**Supported Scheme:**
+- **`tcp://` ONLY**: Pure Layer 4 TCP is fully supported and recommended. It establishes immediately, produces negligible CPU overhead, and maintains rock-solid stability.
+
+**Unsupported Schemes on Embedded MIPS:**
+- **DO NOT use `tls://`**: On 32-bit MIPS / MIPSEL processors (MediaTek MT7620/MT7621/MT7628, Qualcomm Atheros AR9xxx), the `rustls` library crashes with a Segmentation fault (`signal 11`, exit code 139) during TLS handshake state machine initialization and certificate processing. Attempting to connect to a `tls://` peer will immediately kill the daemon process.
+- **DO NOT use `ws://`**: WebSocket transport is compiled out (`--no-default-features`) to eliminate heavy HTTP/WebSocket parsing engines and extra memory allocations.
+- **DO NOT use `quic://`**: QUIC transport is compiled out to eliminate large UDP packet buffer pools, timer state machines, and crypto overhead that trigger out-of-memory crashes on routers with <= 64 MB of RAM.
+
+**Summary for peers_updater:**
+When running `./peers_updater -p`, filter and select **only lines starting with `tcp://`**. If a node lists both `tls://example.com:4443` and `tcp://example.com:4442`, always configure the `tcp://` endpoint.
+
+---
+
+## 6. Upstream Reference & Licensing
+
+- **Upstream Project:** [Revertron/Yggdrasil-ng](https://github.com/Revertron/Yggdrasil-ng)
+- **Upstream Author:** Mikhail f. Revertron and the Yggdrasil Network Contributors
+- **Base Commit Fork Point:** `59e8973d4ed3888ba021785b0808e68c7874449f`
+- **License:** [Mozilla Public License 2.0 (MPL-2.0)](LICENSE)
+
+---
+
+## 7. Disclaimer
+
+This project is provided free of charge on an "as is" and "as available" basis, without warranties of any kind, whether express, implied, or statutory. The authors and maintainers do not assume any legal responsibility, liability, or obligations for network disruption, data loss, hardware damage, or other consequences arising from using this software. You run it entirely at your own risk.
+
