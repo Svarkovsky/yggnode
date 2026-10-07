@@ -1,2 +1,11 @@
-# Project exclude paths
 /target/
+/toolchain/
+/toolchains/
+/tools/
+/compat_lib/
+/mips-linker.sh
+/yggdrasil-mipsel
+/.cargo/config.toml
+/Releases/
+/dist/
+/release_assets/
