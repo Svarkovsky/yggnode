@@ -2,21 +2,27 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
   pull_request:
-    branches: [master]
+    branches: [main, master]
 
 jobs:
   test:
+    name: Test & Static Analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
-      - name: Run tests
-        run: cargo test --workspace
+      - name: Run workspace tests
+        run: cargo test --all-targets --workspace
+
+      - name: Static Analysis (Clippy slim embedded profile)
+        run: cargo clippy --no-default-features --features tun,ctl -p yggdrasil
 
       # Keep the slim build (no ws/quic - e.g. OpenWrt) compiling.
       - name: Check slim build

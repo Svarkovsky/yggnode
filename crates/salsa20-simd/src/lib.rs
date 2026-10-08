@@ -146,7 +146,7 @@ pub fn active_backend() -> &'static str {
         if sse2_cpuid::get() {
             return "SSE2";
         }
-        return "scalar";
+        "scalar"
     }
     #[cfg(target_arch = "aarch64")]
     {
